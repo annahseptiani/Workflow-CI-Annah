@@ -34,10 +34,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas scikit-learn mlflow dagshub
 
-      # 5. Run mlflow project (Diberikan autentikasi otomatis agar bypass login browser)
+      # 5. Run mlflow project
       - name: Run mlflow project
         env:
-          DAGSHUB_CLIENT_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+          DAGSHUB_TOKEN_ENV: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
           mlflow run MLProject --env-manager local
 

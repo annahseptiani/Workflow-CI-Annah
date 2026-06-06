@@ -1,9 +1,17 @@
+import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 import dagshub
 import mlflow
 import mlflow.sklearn
+
+# --- PERBAIKAN UTAMA: Ambil token dari Github Secrets dan paksa masuk ke Environment Sistem ---
+# Ini menjamin library dagshub langsung membaca token tanpa perlu login browser
+dagshub_token = os.getenv("DAGSHUB_TOKEN_ENV")
+if dagshub_token:
+    os.environ["DAGSHUB_CLIENT_TOKEN"] = dagshub_token
+    print("✓ Token DagsHub berhasil disuntikkan ke dalam sistem.")
 
 # Inisialisasi koneksi DagsHub online Anda
 dagshub.init(repo_owner='annahseptiani14', repo_name='membangun_model', mlflow=True)
