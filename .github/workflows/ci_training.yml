@@ -34,12 +34,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas scikit-learn mlflow dagshub
 
-      # 5. Run mlflow project
+      # 5. Run mlflow project (Kita eksekusi langsung script python-nya untuk bypass bug Run ID MLflow)
       - name: Run mlflow project
         env:
           DAGSHUB_TOKEN_ENV: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
-          mlflow run MLProject --env-manager local
+          cd MLProject
+          python modelling.py
 
       # 6. Get latest MLflow run_id
       - name: Get latest MLflow run_id
