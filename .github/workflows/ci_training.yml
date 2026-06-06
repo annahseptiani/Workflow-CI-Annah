@@ -1,87 +1,108 @@
-name: Workflow-CI Training and Docker Push
+name: workflow-ci-mlflow
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: ["main"]
   workflow_dispatch:
 
 jobs:
-  ci-pipeline:
+  build:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Run actions/checkout@v3
-      - name: Run actions/checkout@v3
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      # 2. Set up Python 3.12.7 (Disesuaikan dengan lingkungan lokal laptop Anda)
       - name: Set up Python 3.12.7
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12.7"
 
-      # 3. Check Env
-      - name: Check Env
+      - name: Verify Python installation
         run: |
           python --version
           pip --version
 
-      # 4. Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas scikit-learn mlflow dagshub
+          pip install mlflow==2.22.4 pandas scikit-learn==1.6.1 numpy scipy
 
-      # 5. Run mlflow project (Kita eksekusi langsung script python-nya untuk bypass bug Run ID MLflow)
-      - name: Run mlflow project
+      - name: Run MLflow project
+        working-directory: MLProject
         env:
-          DAGSHUB_TOKEN_ENV: ${{ secrets.DAGSHUB_TOKEN }}
-        run: |
-          cd MLProject
-          python modelling.py
+          MLFLOW_TRACKING_URI: file://${{ github.workspace }}/MLProject/mlruns
+        run: mlflow run . --env-manager=local
 
-      # 6. Get latest MLflow run_id
-      - name: Get latest MLflow run_id
-        id: get_run_id
+      - name: Extract run_id
+        id: runid
+        working-directory: MLProject
         env:
-          DAGSHUB_TOKEN_ENV: ${{ secrets.DAGSHUB_TOKEN }}
+          MLFLOW_TRACKING_URI: file://${{ github.workspace }}/MLProject/mlruns
         run: |
-          RUN_ID=$(python -c "import os, mlflow; os.environ['MLFLOW_TRACKING_USERNAME']='${{ secrets.DAGSHUB_TOKEN }}'; os.environ['MLFLOW_TRACKING_PASSWORD']='${{ secrets.DAGSHUB_TOKEN }}'; mlflow.set_tracking_uri('https://dagshub.com/annahseptiani14/membangun_model.mlflow'); client = mlflow.tracking.MlflowClient(); experiments = client.search_experiments(); ci_exp = [e for e in experiments if e.name == 'Heart_Disease_CI_Automation']; exp_id = ci_exp[0].experiment_id if ci_exp else '0'; runs = client.search_runs(experiment_ids=[exp_id]); print(runs[0].info.run_id if runs else 'none')")
-          echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
-          echo "Menggunakan Run ID Terakhir: $RUN_ID"
+          if [ -f "mlflow_run_id.txt" ]; then
+            RUN_ID=$(cat mlflow_run_id.txt)
+            echo "Found run_id from file: $RUN_ID"
+          else
+            echo "Run ID file not found, searching in mlruns directory..."
+            RUN_ID=$(find mlruns/0 -maxdepth 1 -type d -name '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2 | xargs -r basename)
+          fi
 
-      # 7. Install Python dependencies (Kebutuhan build docker)
-      - name: Install Python dependencies
-        run: pip install gevent
+          if [ -z "$RUN_ID" ] || [ "$RUN_ID" == "0" ]; then
+            echo "ERROR: Could not extract valid run_id"
+            exit 1
+          fi
 
-      # 8. Upload to GitHub (Metode penyimpanan yang kita pilih sebagai pengganti Google Drive)
-      - name: Upload to GitHub
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add .
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Menyimpan perubahan terbaru model dari pipeline CI" && git push)
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Extracted MLflow run_id: $RUN_ID"
 
-      # 9. Build Docker Model (Memakai fungsi mlflow build-docker sesuai instruksi kriteria)
-      - name: Build Docker Model
-        run: |
-          mlflow models build-docker -m "runs:/${{ steps.get_run_id.outputs.RUN_ID }}/model" -n "${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest" --enable-mlserver
-
-      # 10. Log in to Docker Hub
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+      - name: Upload MLflow artifacts
+        uses: actions/upload-artifact@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          name: mlflow_artifacts_${{ steps.runid.outputs.run_id }}
+          path: MLProject/mlruns
 
-      # 11. Tag Docker Image
-      - name: Tag Docker Image
-        run: docker tag ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:v1
-
-      # 12. Push Docker Image
-      - name: Push Docker Image
+      - name: Build Docker model image
+        working-directory: MLProject
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:v1
+          RUN_ID="${{ steps.runid.outputs.run_id }}"
+          DOCKERHUB_USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
+          IMAGE="$DOCKERHUB_USERNAME/heart-disease-model:latest"
+
+          cat > Dockerfile <<'EOF'
+          FROM python:3.12-slim
+          ARG RUN_ID
+          ENV RUN_ID="${RUN_ID}" \
+              MLFLOW_TRACKING_URI="file:///app/mlruns" \
+              PYTHONUNBUFFERED=1
+          WORKDIR /app
+          RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+          COPY requirements.txt /app/requirements.txt
+          RUN python -m pip install --upgrade pip && pip install --no-cache-dir -r /app/requirements.txt && pip install --no-cache-dir "fastapi==0.109.2" "starlette==0.36.3"
+          COPY mlruns /app/mlruns
+          EXPOSE 8000
+          CMD mlflow models serve -m "/app/mlruns/0/${RUN_ID}/artifacts/model" --host 0.0.0.0 --port 8000 --env-manager local
+          EOF
+
+          docker build --build-arg RUN_ID="$RUN_ID" -t "$IMAGE" .
+
+      - name: Login to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          DOCKERHUB_USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+
+      - name: Push Docker image to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          DOCKERHUB_USERNAME="$(printf '%s' "$DOCKERHUB_USERNAME" | tr -d '[:space:]')"
+          IMAGE="$DOCKERHUB_USERNAME/heart-disease-model:latest"
+          docker push "$IMAGE"
+
+      - name: Complete job
+        run: echo "Job complete"
