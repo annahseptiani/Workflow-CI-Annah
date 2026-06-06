@@ -37,7 +37,7 @@ jobs:
       # 5. Run mlflow project
       - name: Run mlflow project
         run: |
-          mlflow run MLProject --no-conda
+          mlflow run MLProject --env-manager local
 
       # 6. Get latest MLflow run_id (Mengambil ID run secara dinamis untuk build docker)
       - name: Get latest MLflow run_id
