@@ -1,0 +1,82 @@
+name: Workflow-CI Training and Docker Push
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  ci-pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Run actions/checkout@v3
+      - name: Run actions/checkout@v3
+        uses: actions/checkout@v3
+
+      # 2. Set up Python 3.12.7 (Disesuaikan dengan lingkungan lokal laptop Anda)
+      - name: Set up Python 3.12.7
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12.7"
+
+      # 3. Check Env
+      - name: Check Env
+        run: |
+          python --version
+          pip --version
+
+      # 4. Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas scikit-learn mlflow dagshub
+
+      # 5. Run mlflow project
+      - name: Run mlflow project
+        run: |
+          mlflow run MLProject --no-conda
+
+      # 6. Get latest MLflow run_id (Mengambil ID run secara dinamis untuk build docker)
+      - name: Get latest MLflow run_id
+        id: get_run_id
+        run: |
+          RUN_ID=$(python -c "import mlflow; client = mlflow.tracking.MlflowClient(); runs = client.search_runs(experiment_ids=['1']); print(runs[0].info.run_id if runs else 'none')")
+          echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Menggunakan Run ID Terakhir: $RUN_ID"
+
+      # 7. Install Python dependencies (Kebutuhan build docker)
+      - name: Install Python dependencies
+        run: pip install gevent
+
+      # 8. Upload to GitHub (Metode penyimpanan yang kita pilih sebagai pengganti Google Drive)
+      - name: Upload to GitHub
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add .
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Auto-update: Menyimpan perubahan terbaru model dari pipeline CI" && git push)
+
+      # 9. Build Docker Model (Memakai fungsi mlflow build-docker sesuai instruksi kriteria)
+      - name: Build Docker Model
+        run: |
+          mlflow models build-docker -m "runs:/${{ steps.get_run_id.outputs.RUN_ID }}/model" -n "${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest" --enable-mlserver
+
+      # 10. Log in to Docker Hub
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 11. Tag Docker Image
+      - name: Tag Docker Image
+        run: docker tag ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:v1
+
+      # 12. Push Docker Image
+      - name: Push Docker Image
+        run: |
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:latest
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/heart-disease-model:v1
