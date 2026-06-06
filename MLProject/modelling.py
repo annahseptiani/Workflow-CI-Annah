@@ -2,19 +2,25 @@ import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-import dagshub
 import mlflow
 import mlflow.sklearn
 
-# --- PERBAIKAN UTAMA: Ambil token dari Github Secrets dan paksa masuk ke Environment Sistem ---
-# Ini menjamin library dagshub langsung membaca token tanpa perlu login browser
+# Ambil token dan konfigurasi langsung dari environment GitHub Actions
 dagshub_token = os.getenv("DAGSHUB_TOKEN_ENV")
-if dagshub_token:
-    os.environ["DAGSHUB_CLIENT_TOKEN"] = dagshub_token
-    print("✓ Token DagsHub berhasil disuntikkan ke dalam sistem.")
+repo_owner = "annahseptiani14"
+repo_name = "membangun_model"
 
-# Inisialisasi koneksi DagsHub online Anda
-dagshub.init(repo_owner='annahseptiani14', repo_name='membangun_model', mlflow=True)
+if dagshub_token:
+    # Mengonfigurasi MLflow Tracking secara langsung tanpa menggunakan dagshub.init()
+    os.environ["MLFLOW_TRACKING_USERNAME"] = dagshub_token
+    os.environ["MLFLOW_TRACKING_PASSWORD"] = dagshub_token
+    os.environ["MLFLOW_TRACKING_URI"] = f"https://dagshub.com/{repo_owner}/{repo_name}.mlflow"
+    mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
+    print("✓ Berhasil mengonfigurasi MLflow Tracking URI ke DagsHub secara remote.")
+else:
+    print("⚠️ Peringatan: DAGSHUB_TOKEN_ENV tidak ditemukan.")
+
+# Set nama eksperimen yang dituju
 mlflow.set_experiment("Heart_Disease_CI_Automation")
 
 print("=== Mengambil dataset hasil preprocessing ===")

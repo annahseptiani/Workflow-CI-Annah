@@ -41,11 +41,13 @@ jobs:
         run: |
           mlflow run MLProject --env-manager local
 
-      # 6. Get latest MLflow run_id (Mengambil ID run secara dinamis untuk build docker)
+      # 6. Get latest MLflow run_id
       - name: Get latest MLflow run_id
         id: get_run_id
+        env:
+          DAGSHUB_TOKEN_ENV: ${{ secrets.DAGSHUB_TOKEN }}
         run: |
-          RUN_ID=$(python -c "import mlflow; client = mlflow.tracking.MlflowClient(); runs = client.search_runs(experiment_ids=['1']); print(runs[0].info.run_id if runs else 'none')")
+          RUN_ID=$(python -c "import os, mlflow; os.environ['MLFLOW_TRACKING_USERNAME']='${{ secrets.DAGSHUB_TOKEN }}'; os.environ['MLFLOW_TRACKING_PASSWORD']='${{ secrets.DAGSHUB_TOKEN }}'; mlflow.set_tracking_uri('https://dagshub.com/annahseptiani14/membangun_model.mlflow'); client = mlflow.tracking.MlflowClient(); experiments = client.search_experiments(); ci_exp = [e for e in experiments if e.name == 'Heart_Disease_CI_Automation']; exp_id = ci_exp[0].experiment_id if ci_exp else '0'; runs = client.search_runs(experiment_ids=[exp_id]); print(runs[0].info.run_id if runs else 'none')")
           echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
           echo "Menggunakan Run ID Terakhir: $RUN_ID"
 
